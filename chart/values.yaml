@@ -1,26 +1,139 @@
-app:
-  name: lab-service
-  image: nginxinc/nginx-unprivileged
-  tag: alpine
-  pullPolicy: Always
+# Default values for lab-authelia.
+# NOTE: If you are deploying this chart for your own homelab, update all occurrences of
+# `sso.joeckr.dev`, `joeckr.dev`, and `dc=joeckr,dc=dev` to match your own domain.
+
+global:
+  timezone: "UTC"
+  # Default StorageClass used by both Authelia and LLDAP PersistentVolumeClaims.
+  storageClass: "longhorn"
+
+# ==============================================================================
+# Authelia Configuration
+# ==============================================================================
+authelia:
+  name: authelia
+  image:
+    repository: ghcr.io/authelia/authelia
+    tag: "4.39"
+    pullPolicy: IfNotPresent
+
+  # SQLite on a ReadWriteOnce Longhorn PVC requires a single replica.
   replicaCount: 1
-  port: 8080
-  env: "lab"
+  port: 9091
+
+  # NOTE: Update hostname and domain to match your own environment.
+  hostname: "sso.joeckr.dev" # Public hostname for the Authelia portal
+  domain: "joeckr.dev" # Root cookie domain protected by Authelia
+  defaultRedirectionUrl: "" # Optional post-login redirect URL (must differ from https://<authelia.hostname>)
+
+  logLevel: "info"
+  theme: "auto" # light, dark, grey, oslo, or auto
+
+  session:
+    name: "authelia_session"
+    inactivity: "5m"
+    expiration: "1h"
+    rememberMe: "1M"
+
+  regulation:
+    maxRetries: 3
+    findTime: "2m"
+    banTime: "5m"
+
+  accessControl:
+    defaultPolicy: "two_factor"
+    rules: []
+    # Example custom rules:
+    # - domain: "public.joeckr.dev"
+    #   policy: "bypass"
+    # - domain: "*.joeckr.dev"
+    #   policy: "two_factor"
+
+  ldap:
+    # When lldap.enabled is true, address defaults to ldap://<lldap-service>:3890.
+    # Set this explicitly only if connecting to an external LLDAP instance.
+    address: ""
+    # Defaults to lldap.baseDn when empty (e.g., dc=joeckr,dc=dev).
+    baseDn: ""
+    # Service account DN used by Authelia to bind to LLDAP.
+    # Defaults to uid=<lldap.adminUser>,ou=people,<baseDn> for initial bootstrap.
+    # Recommended: create a dedicated `authelia` user in LLDAP (member of
+    # `lldap_password_manager` or `lldap_strict_readonly`) and update this value.
+    bindUserDn: ""
+
+  # Notifier configuration. Defaults to filesystem notifier on the Longhorn PVC.
+  # Set notifier.smtp.enabled=true to send password reset / 2FA emails via SMTP.
+  notifier:
+    filesystem:
+      filename: "/data/notification.txt"
+    smtp:
+      enabled: false
+      address: "" # e.g., submissions://smtp.example.com:465
+      username: ""
+      sender: "" # e.g., "Authelia <authelia@joeckr.dev>"
+
+  # Secret management for Authelia.
+  # Recommended for production: pre-create a Kubernetes Secret and reference it via existingSecret.
+  # Required keys in existingSecret: jwt-secret, session-secret, storage-encryption-key, ldap-password
+  # Optional key when notifier.smtp.enabled=true: smtp-password
+  existingSecret: ""
+  secrets:
+    # Provide random 32+ char secrets when existingSecret is empty (generate with: openssl rand -hex 32).
+    jwtSecret: ""
+    sessionSecret: ""
+    storageEncryptionKey: ""
+    # Defaults to lldap.secrets.adminPassword when empty.
+    ldapPassword: ""
+    smtpPassword: ""
+
+  persistence:
+    enabled: true
+    # Overrides global.storageClass if set.
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 1Gi
+
+  service:
+    type: ClusterIP
+    port: 9091
+
+  # Kubernetes Gateway API HTTPRoute (Traefik Kubernetes Gateway behind Cloudflare Tunnel).
+  httproute:
+    enabled: true
+    annotations: {}
+    # Update parentRefs to match the Gateway resource name and namespace in your cluster.
+    parentRefs:
+      - name: traefik-gateway
+        namespace: gateway
+        sectionName: web
+    path: /
+    pathType: PathPrefix
+
   resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
     limits:
-      cpu: 250m
+      cpu: 500m
       memory: 256Mi
+
   securityContext:
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: false
     capabilities:
       drop:
         - ALL
+
   podSecurityContext:
     runAsNonRoot: true
+    runAsUser: 1031
+    runAsGroup: 1031
+    fsGroup: 1031
+    fsGroupChangePolicy: OnRootMismatch
     seccompProfile:
       type: RuntimeDefault
-    fsGroup: 1031
+
   tolerations:
     - key: "node-role.kubernetes.io/control-plane"
       operator: "Exists"
@@ -29,15 +142,91 @@ app:
       operator: "Exists"
       effect: "NoSchedule"
 
-service:
-  name: lab-service
-  type: ClusterIP
-  port: 8080
-
-ingress:
+# ==============================================================================
+# LLDAP Configuration
+# ==============================================================================
+lldap:
   enabled: true
-  name: lab-ingress
-  host: "test.joeckr.dev" # add your own domain
-  className: "nginx"
-  path: /
-  pathType: "Prefix"
+  name: lldap
+  image:
+    repository: ghcr.io/lldap/lldap
+    tag: "latest-alpine-rootless"
+    pullPolicy: IfNotPresent
+
+  # SQLite on a ReadWriteOnce Longhorn PVC requires a single replica.
+  replicaCount: 1
+  ldapPort: 3890
+  httpPort: 17170
+
+  # NOTE: Update baseDn to match your own domain (e.g., dc=example,dc=com).
+  baseDn: "dc=joeckr,dc=dev"
+  adminUser: "admin"
+  httpUrl: "http://localhost:17170"
+
+  # Secret management for LLDAP.
+  # Recommended for production: pre-create a Kubernetes Secret and reference it via existingSecret.
+  # Required keys in existingSecret: jwt-secret, key-seed, admin-password
+  existingSecret: ""
+  secrets:
+    # Provide random 32+ char secrets when existingSecret is empty (generate with: openssl rand -hex 32).
+    jwtSecret: ""
+    keySeed: ""
+    adminPassword: ""
+
+  persistence:
+    enabled: true
+    # Overrides global.storageClass if set.
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+    size: 1Gi
+
+  service:
+    type: ClusterIP
+    ldapPort: 3890
+    httpPort: 17170
+
+  # Optional HTTPRoute for the LLDAP Web UI.
+  # Disabled by default for security; access via `kubectl port-forward` unless needed.
+  httproute:
+    enabled: false
+    hostname: "ldap.joeckr.dev" # NOTE: Update to your own domain if enabled
+    annotations: {}
+    parentRefs:
+      - name: traefik-gateway
+        namespace: gateway
+        sectionName: web
+    path: /
+    pathType: PathPrefix
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1031
+    runAsGroup: 1031
+    fsGroup: 1031
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+
+  tolerations:
+    - key: "node-role.kubernetes.io/control-plane"
+      operator: "Exists"
+      effect: "NoSchedule"
+    - key: "node-role.kubernetes.io/master"
+      operator: "Exists"
+      effect: "NoSchedule"

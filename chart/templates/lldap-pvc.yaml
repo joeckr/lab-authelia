@@ -1,0 +1,19 @@
+{{- if and .Values.lldap.enabled .Values.lldap.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "lldap.name" . }}-data
+  labels:
+    {{- include "labels" . | nindent 4 }}
+    {{- include "lldap.selectorLabels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.lldap.persistence.accessModes | nindent 4 }}
+  {{- $storageClass := default .Values.global.storageClass .Values.lldap.persistence.storageClass }}
+  {{- if $storageClass }}
+  storageClassName: {{ $storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.lldap.persistence.size }}
+{{- end }}

@@ -1,0 +1,65 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "authelia.name" . }}-config
+  labels:
+    {{- include "labels" . | nindent 4 }}
+    {{- include "authelia.selectorLabels" . | nindent 4 }}
+data:
+  configuration.yml: |
+    theme: {{ .Values.authelia.theme | quote }}
+
+    server:
+      address: "tcp://0.0.0.0:{{ .Values.authelia.port }}"
+
+    log:
+      level: {{ .Values.authelia.logLevel | quote }}
+
+    totp:
+      issuer: {{ .Values.authelia.hostname | quote }}
+
+    authentication_backend:
+      ldap:
+        implementation: lldap
+        address: {{ include "authelia.ldapAddress" . | quote }}
+        base_dn: {{ include "authelia.ldapBaseDn" . | quote }}
+        user: {{ include "authelia.ldapBindUserDn" . | quote }}
+
+    access_control:
+      default_policy: {{ .Values.authelia.accessControl.defaultPolicy | quote }}
+      {{- with .Values.authelia.accessControl.rules }}
+      rules:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+    session:
+      name: {{ .Values.authelia.session.name | quote }}
+      inactivity: {{ .Values.authelia.session.inactivity | quote }}
+      expiration: {{ .Values.authelia.session.expiration | quote }}
+      remember_me: {{ .Values.authelia.session.rememberMe | quote }}
+      cookies:
+        - domain: {{ .Values.authelia.domain | quote }}
+          authelia_url: "https://{{ .Values.authelia.hostname }}"
+          {{- if .Values.authelia.defaultRedirectionUrl }}
+          default_redirection_url: {{ .Values.authelia.defaultRedirectionUrl | quote }}
+          {{- end }}
+
+    regulation:
+      max_retries: {{ .Values.authelia.regulation.maxRetries }}
+      find_time: {{ .Values.authelia.regulation.findTime | quote }}
+      ban_time: {{ .Values.authelia.regulation.banTime | quote }}
+
+    storage:
+      local:
+        path: /data/db.sqlite3
+
+    notifier:
+      {{- if .Values.authelia.notifier.smtp.enabled }}
+      smtp:
+        address: {{ .Values.authelia.notifier.smtp.address | quote }}
+        username: {{ .Values.authelia.notifier.smtp.username | quote }}
+        sender: {{ .Values.authelia.notifier.smtp.sender | quote }}
+      {{- else }}
+      filesystem:
+        filename: {{ .Values.authelia.notifier.filesystem.filename | quote }}
+      {{- end }}

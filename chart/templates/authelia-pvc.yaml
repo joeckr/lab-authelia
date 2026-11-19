@@ -1,0 +1,19 @@
+{{- if .Values.authelia.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "authelia.name" . }}-data
+  labels:
+    {{- include "labels" . | nindent 4 }}
+    {{- include "authelia.selectorLabels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.authelia.persistence.accessModes | nindent 4 }}
+  {{- $storageClass := default .Values.global.storageClass .Values.authelia.persistence.storageClass }}
+  {{- if $storageClass }}
+  storageClassName: {{ $storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.authelia.persistence.size }}
+{{- end }}

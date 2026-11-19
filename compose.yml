@@ -1,22 +1,55 @@
+# Local preview stack: LLDAP + Authelia.
+# Start with: mise run compose (or: podman compose up -d)
+#   Authelia Portal: http://127.0.0.1:9091  (must use 127.0.0.1, not localhost)
+#   LLDAP Admin UI:  http://localhost:17170 (user: admin / pass: localdevpass)
+
 services:
-  lab-service:
-    container_name: lab-service
-    image: nginxinc/nginx-unprivileged:alpine
+  lldap:
+    container_name: lldap
+    image: ghcr.io/lldap/lldap:latest-alpine-rootless
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "3890:3890"
+      - "17170:17170"
     environment:
-      - ENV=lab
-      - LOG_LEVEL=debug
+      - TZ=UTC
+      - LLDAP_LDAP_BASE_DN=dc=local
+      - LLDAP_LDAP_USER_DN=admin
+      - LLDAP_HTTP_URL=http://localhost:17170
+      - LLDAP_JWT_SECRET=${LLDAP_JWT_SECRET:-local-dev-only-lldap-jwt-secret-0123456789}
+      - LLDAP_KEY_SEED=${LLDAP_KEY_SEED:-local-dev-only-lldap-key-seed-0123456789}
+      - LLDAP_LDAP_USER_PASS=${LLDAP_ADMIN_PASS:-localdevpass}
     volumes:
-      - lab-data:/tmp/data
+      - lldap-data:/data
+
+  authelia:
+    container_name: authelia
+    image: ghcr.io/authelia/authelia:4.39
+    user: "1031:1031"
+    restart: unless-stopped
+    depends_on:
+      - lldap
+    ports:
+      - "9091:9091"
+    environment:
+      - TZ=UTC
+      - X_AUTHELIA_CONFIG=/config/configuration.yml
+      - AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET=${AUTHELIA_JWT_SECRET:-local-dev-only-authelia-jwt-secret-012345}
+      - AUTHELIA_SESSION_SECRET=${AUTHELIA_SESSION_SECRET:-local-dev-only-authelia-session-0123456789}
+      - AUTHELIA_STORAGE_ENCRYPTION_KEY=${AUTHELIA_STORAGE_KEY:-local-dev-only-authelia-storage-0123456789}
+      - AUTHELIA_AUTHENTICATION_BACKEND_LDAP_PASSWORD=${LLDAP_ADMIN_PASS:-localdevpass}
+    volumes:
+      - ./compose/configuration.yml:/config/configuration.yml:ro
+      - authelia-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8080/ || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:9091/api/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      start_period: 10s
 
 volumes:
-  lab-data:
+  lldap-data:
+    driver: local
+  authelia-data:
     driver: local

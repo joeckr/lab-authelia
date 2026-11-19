@@ -1,0 +1,110 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "authelia.name" . }}
+  labels:
+    {{- include "labels" . | nindent 4 }}
+    {{- include "authelia.selectorLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.authelia.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "authelia.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/authelia-configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "labels" . | nindent 8 }}
+        {{- include "authelia.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.authelia.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.authelia.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      containers:
+        - name: authelia
+          image: "{{ .Values.authelia.image.repository }}:{{ .Values.authelia.image.tag }}"
+          imagePullPolicy: {{ .Values.authelia.image.pullPolicy }}
+          {{- with .Values.authelia.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - containerPort: {{ .Values.authelia.port }}
+              name: http
+              protocol: TCP
+          env:
+            - name: TZ
+              value: {{ .Values.global.timezone | quote }}
+            - name: X_AUTHELIA_CONFIG
+              value: /config/configuration.yml
+            - name: AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE
+              value: /secrets/jwt-secret
+            - name: AUTHELIA_SESSION_SECRET_FILE
+              value: /secrets/session-secret
+            - name: AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE
+              value: /secrets/storage-encryption-key
+            - name: AUTHELIA_AUTHENTICATION_BACKEND_LDAP_PASSWORD_FILE
+              value: /secrets/ldap-password
+            {{- if .Values.authelia.notifier.smtp.enabled }}
+            - name: AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE
+              value: /secrets/smtp-password
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: config
+              mountPath: /config/configuration.yml
+              subPath: configuration.yml
+              readOnly: true
+            - name: secrets
+              mountPath: /secrets
+              readOnly: true
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+          {{- with .Values.authelia.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "authelia.name" . }}-config
+        - name: secrets
+          secret:
+            secretName: {{ include "authelia.secretName" . }}
+            defaultMode: 0440
+        - name: data
+          {{- if .Values.authelia.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "authelia.name" . }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
