@@ -1,0 +1,104 @@
+{{- if .Values.lldap.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lldap.name" . }}
+  labels:
+    {{- include "labels" . | nindent 4 }}
+    {{- include "lldap.selectorLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.lldap.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "lldap.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "labels" . | nindent 8 }}
+        {{- include "lldap.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.lldap.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.lldap.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      containers:
+        - name: lldap
+          image: "{{ .Values.lldap.image.repository }}:{{ .Values.lldap.image.tag }}"
+          imagePullPolicy: {{ .Values.lldap.image.pullPolicy }}
+          {{- with .Values.lldap.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - containerPort: {{ .Values.lldap.ldapPort }}
+              name: ldap
+              protocol: TCP
+            - containerPort: {{ .Values.lldap.httpPort }}
+              name: http
+              protocol: TCP
+          env:
+            - name: TZ
+              value: {{ .Values.global.timezone | quote }}
+            - name: LLDAP_LDAP_BASE_DN
+              value: {{ .Values.lldap.baseDn | quote }}
+            - name: LLDAP_LDAP_USER_DN
+              value: {{ .Values.lldap.adminUser | quote }}
+            - name: LLDAP_HTTP_URL
+              value: {{ .Values.lldap.httpUrl | quote }}
+            - name: LLDAP_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lldap.secretName" . }}
+                  key: jwt-secret
+            - name: LLDAP_KEY_SEED
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lldap.secretName" . }}
+                  key: key-seed
+            - name: LLDAP_LDAP_USER_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "lldap.secretName" . }}
+                  key: admin-password
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: ldap
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+          {{- with .Values.lldap.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: data
+          {{- if .Values.lldap.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "lldap.name" . }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
+{{- end }}

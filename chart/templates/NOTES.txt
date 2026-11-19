@@ -1,0 +1,31 @@
+lab-authelia has been deployed to namespace "{{ .Release.Namespace }}".
+
+1. Authelia Portal:
+{{- if .Values.authelia.httproute.enabled }}
+   URL: https://{{ .Values.authelia.hostname }}
+   (Ensure your Cloudflare Tunnel forwards "{{ .Values.authelia.hostname }}" to your Traefik Kubernetes Gateway.)
+{{- else }}
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "authelia.name" . }} 9091:{{ .Values.authelia.service.port }}
+   Then open: http://localhost:9091
+{{- end }}
+
+{{- if .Values.lldap.enabled }}
+
+2. LLDAP Administration UI:
+{{- if .Values.lldap.httproute.enabled }}
+   URL: https://{{ .Values.lldap.httproute.hostname }}
+{{- else }}
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "lldap.name" . }} 17170:{{ .Values.lldap.service.httpPort }}
+   Then open: http://localhost:17170
+{{- end }}
+   Admin User: {{ .Values.lldap.adminUser }}
+   Base DN:    {{ .Values.lldap.baseDn }}
+{{- end }}
+
+3. Next Steps:
+   - If you have not already done so, replace all placeholder secrets (or configure `existingSecret`).
+   - Log into LLDAP, create your user accounts/groups, and optionally create a dedicated
+     `authelia` bind user (member of `lldap_password_manager` or `lldap_strict_readonly`)
+     to replace the default admin bind account.
+   - Check filesystem notifications (e.g., 2FA registration links) with:
+     kubectl -n {{ .Release.Namespace }} exec deploy/{{ include "authelia.name" . }} -- cat {{ .Values.authelia.notifier.filesystem.filename }}

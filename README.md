@@ -1,31 +1,45 @@
-# skeleton-lab-service
+# lab-authelia
 
-A starter skeleton repository tailored for rapid experimentation, prototyping, and testing of services in a lab environment (local container runtimes and Kubernetes).
+A hardened, self-contained Helm chart and documentation for deploying **Authelia** with **LLDAP** on Kubernetes — tailored for a homelab running **Talos Linux**, **Cloudflare Tunnel** forwarding to a **Traefik Kubernetes Gateway** (`gateway.networking.k8s.io/v1`), and **Longhorn** persistent storage.
 
-> **Note**: This repository intentionally **does NOT include a Dockerfile**. If a custom image build is required, use an OCI image repository (such as `skeleton-oci-modified`). Lab repositories focus on configuring, deploying, and testing upstream or pre-built container services.
+> [!IMPORTANT]
+> **Update the Hostname & Domain for Your Environment**
+> The default configuration in [`chart/values.yaml`](chart/values.yaml) uses **`sso.joeckr.dev`**, cookie domain **`joeckr.dev`**, and LDAP Base DN **`dc=joeckr,dc=dev`**. If you are deploying this chart in your own homelab, override `authelia.hostname`, `authelia.domain`, and `lldap.baseDn` (plus `authelia.httproute.parentRefs` if your Traefik Gateway uses a different name or namespace) before installing.
 
 ---
 
-## Features
+## Architecture
 
-- **Helm Chart (`chart/`)**:
-  - Out-of-the-box support for deploying services to Kubernetes.
-  - Parameterized upstream container image (`image:tag`), replica count, and ports.
-  - Standard Kubernetes Ingress support (`networking.k8s.io/v1`).
-  - Secure defaults: non-root execution (`runAsNonRoot: true`), `RuntimeDefault` seccomp profile, and dropping `ALL` capabilities.
-  - Master and control-plane node tolerations for compact lab clusters.
-- **Compose (`compose.yml`)**:
-  - Spin up and test the lab service locally in seconds without requiring a cluster.
-  - Pre-configured with port forwarding, and healthchecks.
-- **Environment & Tooling (`mise` & `hk`)**:
-  - `mise.toml`: Tool version management (`helm`, `betterleaks`, `addlicense`, `trivy`, `actionlint`, `shellcheck`, `zizmor`, `hk`, `pkl`, `tombi`, `yamllint`) and convenient task aliases.
-  - `hk.pkl`: Fast git hooks and project checks enforcing Conventional Commits, branch protection, secret scanning (`betterleaks`), Helm linting, workflow linting (`actionlint`), security audits (`zizmor`), YAML linting (`yamllint`), TOML linting (`tombi`), shell checking (`shellcheck`), and license checks (`addlicense`).
-- **GitHub Actions CI (`.github/workflows/`)**:
-  - Reusable workflows powered by [`joeckr/ci-templates`](https://github.com/joeckr/ci-templates):
-    - `lint.yml`: Lints GitHub Actions workflow syntax (`actionlint`), Conventional Commits (`commitlint`), and shell scripts (`shellcheck`).
-    - `security.yml`: Scans commits and PRs for secret leaks (`betterleaks`) and workflow security audits (`zizmor`).
-    - `release.yml`: Automated Semantic Versioning, git tagging, release notes, `Chart.yaml` version syncing (`semantic`), and packaging/publishing Helm charts to GitHub Container Registry (GHCR) as OCI artifacts.
-    - `test_release.yml`: PR dry-run preview for Semantic Versioning and Helm chart packaging.
+```text
+Internet
+   │
+   ▼
+Cloudflare Edge (TLS termination)
+   │
+   ▼
+Cloudflare Tunnel (cloudflared)
+   │  forwards sso.joeckr.dev
+   ▼
+Traefik Kubernetes Gateway (Gateway API)
+   │  HTTPRoute (sso.joeckr.dev)
+   ▼
+Authelia Service (:9091) ──▶ Authelia Pod (SQLite on Longhorn PVC)
+                                │
+                                │ LDAP (:3890)
+                                ▼
+                             LLDAP Service (:3890 / :17170) ──▶ LLDAP Pod (SQLite on Longhorn PVC)
+```
+
+### Key Features
+
+- **Bundled Authelia + LLDAP**: Pre-wired LDAP integration (`authentication_backend.ldap.implementation: lldap`) with both workloads managed in a single Helm release.
+- **Kubernetes Gateway API (`HTTPRoute`)**: Routes `sso.joeckr.dev` through your Traefik Kubernetes Gateway (`gateway.networking.k8s.io/v1`). Optional `HTTPRoute` for LLDAP Web UI (disabled by default for security).
+- **Longhorn Persistence**: Dedicated `ReadWriteOnce` Longhorn PVCs for Authelia's SQLite database (`/data/db.sqlite3`) and LLDAP's SQLite directory database (`/data`). Deployments use `strategy.type: Recreate` to avoid RWO volume attachment deadlocks during rollouts.
+- **Hardened for Talos Linux & PSS `restricted`**:
+  - Rootless images (`ghcr.io/authelia/authelia` and `ghcr.io/lldap/lldap:latest-alpine-rootless`).
+  - `runAsNonRoot: true`, `readOnlyRootFilesystem: true`, `allowPrivilegeEscalation: false`, `capabilities.drop: ["ALL"]`, `seccompProfile.type: RuntimeDefault`, and `automountServiceAccountToken: false`.
+  - Secrets mounted as read-only files (`_FILE` env vars) for Authelia rather than exposed in `configuration.yml` or plaintext environment variables.
+  - Control-plane/master tolerations included for compact Talos homelab clusters.
 
 ---
 
@@ -35,241 +49,242 @@ A starter skeleton repository tailored for rapid experimentation, prototyping, a
 .
 ├── .github/
 │   └── workflows/
-│       ├── lint.yml             # Lints workflows, commits, and shell scripts
-│       ├── security.yml         # Scans for secrets and audits workflow security
-│       ├── release.yml          # Semantic release and Helm chart publishing to GHCR
-│       └── test_release.yml     # PR dry-run test for releases and chart packaging
+│       ├── lint.yml                     # Lints workflows, commits, and shell scripts
+│       ├── security.yml                 # Scans for secrets and audits workflow security
+│       ├── release.yml                  # Semantic release and Helm chart publishing to GHCR
+│       └── test_release.yml             # PR dry-run test for releases and chart packaging
 ├── chart/
-│   ├── Chart.yaml               # Helm chart definition
-│   ├── values.yaml              # Default configuration values
-│   ├── .helmignore              # Ignore rules for chart packaging
+│   ├── Chart.yaml                       # Helm chart metadata
+│   ├── values.yaml                      # Default values (update hostname/domain/secrets)
+│   ├── .helmignore                      # Ignore rules for chart packaging
 │   └── templates/
-│       ├── deployment.yaml      # Workload deployment
-│       ├── service.yaml         # Kubernetes Service
-│       └── ingress.yaml         # Kubernetes Ingress
-├── scripts/
-│   └── template.sh              # Helper script placeholder
-├── compose.yml                  # Local lab service definition
-├── hk.pkl                       # hk git hooks and checks configuration
-├── mise.toml                    # Mise tools and tasks
+│       ├── _helpers.tpl                 # Shared naming, label, and LDAP helpers
+│       ├── NOTES.txt                    # Post-install instructions
+│       ├── authelia-configmap.yaml      # Authelia configuration.yml
+│       ├── authelia-deployment.yaml     # Authelia Deployment (PSS restricted)
+│       ├── authelia-httproute.yaml      # Gateway API HTTPRoute for sso.joeckr.dev
+│       ├── authelia-pvc.yaml            # Longhorn PVC for Authelia SQLite & notifier
+│       ├── authelia-secret.yaml         # Authelia secrets (when existingSecret is unset)
+│       ├── authelia-service.yaml        # Authelia ClusterIP Service (:9091)
+│       ├── lldap-deployment.yaml        # LLDAP Deployment (PSS restricted, rootless)
+│       ├── lldap-httproute.yaml         # Optional Gateway API HTTPRoute for LLDAP UI
+│       ├── lldap-pvc.yaml               # Longhorn PVC for LLDAP database
+│       ├── lldap-secret.yaml            # LLDAP secrets (when existingSecret is unset)
+│       └── lldap-service.yaml           # LLDAP ClusterIP Service (:3890, :17170)
+├── hk.pkl                               # hk git hooks and checks configuration
+├── mise.toml                            # Mise tools and tasks
 └── README.md
 ```
 
 ---
 
-## Security & Hardened Image Architecture
+## Prerequisites
 
-Modern hardened Kubernetes environments prioritize workload security and least privilege by enforcing strict runtime constraints. This repository is architected to produce rootless, hardened container images that run out-of-the-box under restricted security standards without requiring root privileges.
-
-### Hardened Container Standards (Kubernetes PSS `restricted`)
-
-Under the Kubernetes **Pod Security Admission (PSA)** `restricted` profile and modern hardened container runtimes:
-- **Must Run As Non-Root**: The pod specification sets `securityContext.runAsNonRoot: true` with a dedicated non-root UID (`USER 1031` or dynamic non-root UID). Containers cannot execute as UID 0.
-- **Arbitrary Dynamic UIDs**: Workload environments may assign dynamic arbitrary non-root UIDs. Files and directories required at runtime are configured with group 0 permissions (`chgrp -R 0` and `chmod -R g+rwX`) so any non-root UID can execute and access required assets.
-- **Drop All Capabilities**: The container specification explicitly drops all Linux capabilities (`capabilities.drop: ["ALL"]`).
-- **Disallow Privilege Escalation**: Pods enforce `securityContext.allowPrivilegeEscalation: false` to prevent child processes from acquiring additional privileges.
-- **RuntimeDefault Seccomp**: Workloads enforce `seccompProfile: { type: RuntimeDefault }` to restrict syscalls to safe defaults.
-- **Credential Protection**: Hardened with `automountServiceAccountToken: false` to avoid leaking Kubernetes API tokens to application containers unless explicitly needed.
-- **Unprivileged Ports**: Containers listen on non-privileged ports (> 1024).
-- **Standard Ingress & Storage**: Uses standard Kubernetes `networking.k8s.io/v1` `Ingress` and standard CSI PersistentVolumeClaims.
-
-### Compliance Matrix
-
-| Security Dimension | Restricted Standard Requirement | Implementation in This Repo |
-|---|---|---|
-| **Workload Execution** | Non-root UID (`runAsNonRoot: true`) | Unprivileged container image (`nginx-unprivileged`) + `runAsNonRoot: true` |
-| **Group Permissions** | GID 0 (`root` group) with `g+rwX` | Configured for arbitrary UIDs and group 0 compatibility |
-| **Capabilities** | Must drop `ALL` capabilities | `capabilities.drop: ["ALL"]` in Helm chart |
-| **Privilege Escalation** | Prohibited (`allowPrivilegeEscalation: false`) | Configured in Helm `securityContext` |
-| **Seccomp Profile** | `RuntimeDefault` or `Localhost` | `seccompProfile: { type: RuntimeDefault }` |
-| **Service Account Token** | Disabled unless required | `automountServiceAccountToken: false` in pod spec |
-| **Port Binding** | Unprivileged (> 1024) | Listens on port `8080` |
-| **Ingress Layer** | Standard Kubernetes Ingress | Kubernetes Ingress (`networking.k8s.io/v1`) |
----
-
-## Local Environment & Podman Setup
-
-To ensure containerized applications and Helm charts tested locally run cleanly when deployed to hardened Kubernetes environments, this repository is designed to be used alongside the Podman configuration in [joeckr/dotfiles](https://github.com/joeckr/dotfiles).
-
-The dotfiles repository provides a centralized [`containers.conf`](https://github.com/joeckr/dotfiles/blob/main/containers/containers.conf) (deployed to `~/.config/containers/containers.conf`) that configures Podman to enforce rootless and hardened container runtime restrictions in testing:
-
-| Security Rule | Podman Configuration | Description |
-|---|---|---|
-| **Random UID (`MustRunAsRange`)** | `userns = "auto"` | Allocates dynamic subordinate UID/GID ranges from `/etc/subuid` and `/etc/subgid`. Containers run unprivileged without mapping host root. |
-| **Drop Capabilities** | `default_capabilities = ["NET_BIND_SERVICE"]` | Drops standard root capabilities (`CHOWN`, `DAC_OVERRIDE`, `FOWNER`, `SETUID`, `SETGID`, `SYS_CHROOT`, etc.) and permits only `NET_BIND_SERVICE`. |
-| **Disallow Privileged** | `privileged = false` | Disallows privileged container execution by default. |
-| **Seccomp Profile** | `seccomp_profile = "/usr/share/containers/seccomp.json"` | Enforces the runtime default seccomp profile (`RuntimeDefault`). |
-| **Namespace Isolation** | `cgroupns`, `ipcns`, `pidns`, `utsns = "private"` | Enforces private container namespaces (host namespaces are forbidden in restricted profiles). |
-
-### macOS Podman Machine Integration
-
-On macOS, the dotfiles installer script (`brew/podman.sh`) automates the machine lifecycle:
-
-1. Deploys `containers/containers.conf` to `~/.config/containers/containers.conf` on the host.
-2. Initializing `podman machine init` automatically mounts `~/.config/containers` into `/etc/containers` inside the Fedora CoreOS VM.
-3. Automatically symlinks `/etc/containers/containers.conf` to the VM user's config (`~core/.config/containers/containers.conf`) and restarts the Podman API service so all container executions immediately enforce these constraints.
+1. **Talos Linux Kubernetes cluster** with `kubectl` and `helm` (`>= 3.14`) configured.
+2. **Longhorn** installed with a `longhorn` `StorageClass` (or override `global.storageClass`).
+3. **Traefik with Kubernetes Gateway API** enabled and a `Gateway` resource created (defaults expect `name: traefik-gateway` in namespace `gateway`, listener `web`).
+   - Ensure the `Gateway` listener allows routes from the namespace where you install this chart (e.g., `allowedRoutes.namespaces.from: All` or `Selector`).
+4. **Cloudflare Tunnel (`cloudflared`)** configured to forward your Authelia hostname (`sso.joeckr.dev`) to your Traefik Kubernetes Gateway service:
+   - In Cloudflare Zero Trust -> **Networks** -> **Tunnels** -> **Public Hostnames**:
+     - **Subdomain / Domain**: `sso.joeckr.dev` (replace with your own domain)
+     - **Service**: `http://gateway-traefik.gateway.svc.cluster.local:80` (adjust to match your Traefik service name and namespace).
+   - Ensure Traefik's `web` entrypoint trusts `X-Forwarded-*` headers from your `cloudflared` pods (`ports.web.forwardedHeaders.trustedIPs` set to your cluster pod CIDR, or `insecure: true` if internal-only) so Authelia sees the correct client IP and `https` scheme.
 
 ---
 
-## Testing & Validation Process
+## Installation
 
-This repository defines a 3-tier testing process to validate container security, manifest generation, and runtime compatibility from local development through to production cluster deployment.
+### 1. Create a Namespace
 
-```
-┌─────────────────────────┐     ┌─────────────────────────┐     ┌─────────────────────────┐
-│ Tier 1: Local Container │ ──> │ Tier 2: Podman Play     │ ──> │ Tier 3: K8s Cluster     │
-│ Fast local prototyping  │     │ Validate K8s manifests  │     │ Live Helm verification  │
-│ (compose.yml)           │     │ (podman play kube)      │     │ (helm install)          │
-└─────────────────────────┘     └─────────────────────────┘     └─────────────────────────┘
-```
-
-### Tier 1: Local Container Validation (`compose.yml`)
-
-The [`compose.yml`](compose.yml) configuration runs the service container locally using Podman Compose:
+Optionally label the namespace to enforce Kubernetes Pod Security Standards (`restricted`):
 
 ```sh
-# Start container in detached mode
+kubectl create namespace authelia
+kubectl label namespace authelia \
+  pod-security.kubernetes.io/enforce=restricted \
+  pod-security.kubernetes.io/enforce-version=latest
+```
+
+### 2. Prepare Secrets (Recommended: Pre-Created Kubernetes Secrets)
+
+Using `existingSecret` keeps sensitive values out of your Helm values files and Git history. Generate strong random secrets and create both Kubernetes Secrets:
+
+```sh
+# Generate random secrets
+AUTHELIA_JWT_SECRET=$(openssl rand -hex 32)
+AUTHELIA_SESSION_SECRET=$(openssl rand -hex 32)
+AUTHELIA_STORAGE_KEY=$(openssl rand -hex 32)
+LLDAP_JWT_SECRET=$(openssl rand -hex 32)
+LLDAP_KEY_SEED=$(openssl rand -hex 32)
+LLDAP_ADMIN_PASSWORD=$(openssl rand -base64 24)
+
+# Create LLDAP Secret
+kubectl -n authelia create secret generic lldap-secrets \
+  --from-literal=jwt-secret="${LLDAP_JWT_SECRET}" \
+  --from-literal=key-seed="${LLDAP_KEY_SEED}" \
+  --from-literal=admin-password="${LLDAP_ADMIN_PASSWORD}"
+
+# Create Authelia Secret (uses LLDAP admin password for initial bootstrap)
+kubectl -n authelia create secret generic authelia-secrets \
+  --from-literal=jwt-secret="${AUTHELIA_JWT_SECRET}" \
+  --from-literal=session-secret="${AUTHELIA_SESSION_SECRET}" \
+  --from-literal=storage-encryption-key="${AUTHELIA_STORAGE_KEY}" \
+  --from-literal=ldap-password="${LLDAP_ADMIN_PASSWORD}"
+```
+
+### 3. Create a Values Override File
+
+Create a local `my-values.yaml` (do not commit secrets to Git). Update the hostname, domain, Base DN, and Gateway `parentRefs` as needed:
+
+```yaml
+global:
+  timezone: "America/New_York"
+  storageClass: "longhorn"
+
+authelia:
+  # Update these to your own domain!
+  hostname: "sso.joeckr.dev"
+  domain: "joeckr.dev"
+  existingSecret: "authelia-secrets"
+  httproute:
+    enabled: true
+    parentRefs:
+      - name: traefik-gateway
+        namespace: gateway
+        sectionName: web
+
+lldap:
+  enabled: true
+  # Update this to match your own domain!
+  baseDn: "dc=joeckr,dc=dev"
+  existingSecret: "lldap-secrets"
+```
+
+### 4. Deploy with Helm
+
+Install from the local repository:
+
+```sh
+helm upgrade --install authelia chart/ \
+  --namespace authelia \
+  --values my-values.yaml
+```
+
+Or install directly from the published OCI chart on GHCR:
+
+```sh
+helm upgrade --install authelia oci://ghcr.io/joeckr/charts/lab-authelia \
+  --namespace authelia \
+  --values my-values.yaml
+```
+
+### 5. Verify the Deployment
+
+```sh
+# Check pods and PVCs
+kubectl -n authelia get pods,pvc,httproute
+
+# Check Authelia logs
+kubectl -n authelia logs -l app.kubernetes.io/name=authelia -f
+
+# Check LLDAP logs
+kubectl -n authelia logs -l app.kubernetes.io/name=lldap -f
+```
+
+---
+
+## Post-Install LLDAP Setup
+
+By default, the LLDAP Web UI `HTTPRoute` is disabled so the directory admin panel is not exposed publicly.
+
+1. **Port-forward to LLDAP**:
+   ```sh
+   kubectl -n authelia port-forward svc/authelia-lldap 17170:17170
+   ```
+   Open [http://localhost:17170](http://localhost:17170) and sign in with username `admin` and the `admin-password` you generated.
+
+2. **Create Your Users & Groups**:
+   - Create your personal user account (with an email address and password).
+   - Create any groups you want to use in Authelia access control rules (e.g., `admins`, `homelab`).
+
+3. **(Recommended) Create a Dedicated Authelia Bind Account**:
+   - Instead of having Authelia bind as `admin`, create a dedicated user in LLDAP (e.g., `authelia`) and add it to the **`lldap_password_manager`** group (allows password resets via Authelia) or **`lldap_strict_readonly`** group (read-only authentication).
+   - Update `ldap-password` in your `authelia-secrets` Secret with the new user's password and set `authelia.ldap.bindUserDn` in your values file:
+     ```yaml
+     authelia:
+       ldap:
+         bindUserDn: "uid=authelia,ou=people,dc=joeckr,dc=dev"
+     ```
+   - Re-run `helm upgrade`.
+
+4. **Viewing 2FA / Password Reset Notifications (Filesystem Notifier)**:
+   When using the default filesystem notifier, Authelia writes links (such as TOTP/WebAuthn registration links) to `/data/notification.txt` on its Longhorn PVC:
+   ```sh
+   kubectl -n authelia exec deploy/authelia -- cat /data/notification.txt
+   ```
+   To send real emails instead, set `authelia.notifier.smtp.enabled: true` and provide SMTP credentials in `values.yaml` / `authelia-secrets`.
+
+---
+
+## Key Configuration Values
+
+| Value | Default | Description |
+|---|---|---|
+| `global.timezone` | `"UTC"` | Timezone (`TZ`) for both Authelia and LLDAP |
+| `global.storageClass` | `"longhorn"` | StorageClass for Longhorn PVCs |
+| `authelia.hostname` | `"sso.joeckr.dev"` | Public Authelia hostname (**update for your domain**) |
+| `authelia.domain` | `"joeckr.dev"` | Cookie domain protected by Authelia (**update for your domain**) |
+| `authelia.existingSecret` | `""` | Pre-existing Kubernetes Secret name for Authelia |
+| `authelia.httproute.enabled` | `true` | Create Gateway API `HTTPRoute` for Authelia |
+| `authelia.httproute.parentRefs` | `traefik-gateway` in `gateway` (`web`) | Target Traefik Kubernetes `Gateway` reference |
+| `authelia.persistence.size` | `1Gi` | Longhorn PVC size for Authelia SQLite DB & notifier |
+| `authelia.accessControl.defaultPolicy` | `"two_factor"` | Default Authelia access control policy |
+| `lldap.enabled` | `true` | Deploy bundled LLDAP alongside Authelia |
+| `lldap.baseDn` | `"dc=joeckr,dc=dev"` | LDAP Base DN (**update for your domain**) |
+| `lldap.existingSecret` | `""` | Pre-existing Kubernetes Secret name for LLDAP |
+| `lldap.persistence.size` | `1Gi` | Longhorn PVC size for LLDAP SQLite DB |
+| `lldap.httproute.enabled` | `false` | Optionally expose LLDAP Web UI via `HTTPRoute` |
+
+See [`chart/values.yaml`](chart/values.yaml) for the complete list of configurable options.
+
+---
+
+## Security & Hardened Pod Architecture (Kubernetes PSS `restricted`)
+
+Both Authelia and LLDAP pods comply with the Kubernetes **Pod Security Standards `restricted`** profile out of the box on Talos Linux:
+
+| Security Dimension | Restricted Standard Requirement | Implementation in This Chart |
+|---|---|---|
+| **Workload Execution** | Non-root UID (`runAsNonRoot: true`) | `runAsNonRoot: true`, `runAsUser: 1031`, `runAsGroup: 1031`, `fsGroup: 1031` |
+| **Root Filesystem** | Hardened per workload | `readOnlyRootFilesystem: true` on LLDAP; `false` on Authelia (SQLite runtime) |
+| **Capabilities** | Must drop `ALL` capabilities | `capabilities.drop: ["ALL"]` |
+| **Privilege Escalation** | Prohibited | `allowPrivilegeEscalation: false` |
+| **Seccomp Profile** | `RuntimeDefault` or `Localhost` | `seccompProfile: { type: RuntimeDefault }` |
+| **Service Account Token** | Disabled unless required | `automountServiceAccountToken: false` |
+| **Port Binding** | Unprivileged (> 1024) | Authelia `9091`, LLDAP `3890` / `17170` |
+| **Routing Layer** | Kubernetes Gateway API | `gateway.networking.k8s.io/v1` `HTTPRoute` |
+
+---
+
+## Local Preview (`compose.yml`)
+
+You can preview Authelia + LLDAP locally before deploying to your cluster:
+
+```sh
+# Start LLDAP and Authelia
 mise run compose
 # or: podman compose up -d
 
-# View container logs
+# Tail logs
 mise run logs
-# or: podman compose logs -f
 
-# Verify connectivity
-curl http://localhost:8080
-
-# Stop container
+# Stop and remove containers
 mise run down
-# or: podman compose down
 ```
 
-**What this verifies:**
-- Unprivileged user execution without host root privileges.
-- Unprivileged port binding on port `8080`.
-- Health check verification and local volume mount handling.
-
----
-
-### Tier 2: Local Kubernetes Manifest Testing (`mise run play`)
-
-Before deploying to an actual Kubernetes cluster, you can test the rendered Kubernetes manifests locally using Podman's built-in `play kube` feature.
-
-```sh
-# Render templates and play Kubernetes manifests locally
-mise run play
-
-# Teardown the played pod and resources
-mise run play-d
-```
-
-**How `mise run play` works:**
-1. Triggers the dependent task `mise run helm-t`, which executes:
-   ```sh
-   helm dependency build chart/
-   helm template test chart/ > rendered.yaml
-   ```
-2. Executes `podman play kube rendered.yaml --publish-all`, which:
-   - Reads the multi-document Kubernetes YAML (`Deployment`, `Service`).
-   - Creates a local Podman pod matching the Kubernetes `Deployment` specification.
-   - Applies the pod's `securityContext` (`runAsNonRoot: true`, capabilities drop, seccomp profile).
-   - Exposes container port `8080`.
-
-**Inspecting the local play deployment:**
-```sh
-# View running pods created by play kube
-podman pod ps
-
-# View container status within the pod
-podman ps --filter "pod=lab-service"
-
-# Verify service response
-curl http://localhost:8080
-
-# Check container logs within the pod
-podman logs -f lab-service-pod-lab-service
-```
-
-**Teardown:**
-```sh
-mise run play-d
-# or: podman play kube rendered.yaml --down
-```
-
----
-
-### Tier 3: Cluster Deployment & Testing on Kubernetes (`mise run helm-i`)
-
-The final phase validates the workload on a live Kubernetes cluster. This tests real-world Pod Security Admission (PSA) enforcement, network routing, and container startup under production constraints.
-
-#### 1. Cluster Prerequisites & Configuration
-
-Ensure your `kubectl` context points to your Kubernetes cluster:
-```sh
-kubectl config current-context
-```
-
-Verify that the target namespace enforces the `restricted` Pod Security Standard:
-```sh
-kubectl get ns default --show-labels
-# Should include:
-# pod-security.kubernetes.io/enforce=restricted
-# pod-security.kubernetes.io/enforce-version=latest
-```
-
-#### 2. Linting & Template Validation
-
-Run the linter and inspect the generated manifests before cluster deployment:
-```sh
-mise run helm-l
-mise run helm-t
-
-```
-
-#### 3. Deploying to the Cluster
-
-Install the Helm chart release:
-```sh
-mise run helm-i
-# or: helm install test chart/
-```
-
-#### 4. Verifying PSS Compliance & Health
-
-Check the pod status and verify that Kubernetes Pod Security Admission (PSA) allowed the pod to run:
-
-```sh
-# Check pod deployment status
-kubectl get pods -l app=lab-service
-
-# Inspect pod details and events for security policy rejections
-kubectl describe pod -l app=lab-service
-```
-
-> [!TIP]
-> If your namespace enforces the `restricted` Pod Security Standard and there are non-compliant settings (such as missing `runAsNonRoot` or un-dropped capabilities), `kubectl describe pod` will show warning events from the `pod-security` admission controller.
-
-Check the application logs:
-```sh
-kubectl logs -l app=lab-service -f
-```
-
-Verify service access via port-forwarding:
-```sh
-# Forward port 8080 from the cluster pod
-kubectl port-forward svc/lab-service 8080:8080
-
-# In a separate shell, test HTTP response
-curl http://localhost:8080
-```
-
-#### 5. Uninstalling from the Cluster
-
-When testing is complete, clean up the release:
-```sh
-mise run helm-u
-# or: helm uninstall test
-```
+- **Authelia Portal**: [http://127.0.0.1:9091](http://127.0.0.1:9091) *(use `127.0.0.1`, not `localhost`, to match the configured session cookie domain)*
+- **LLDAP Admin UI**: [http://localhost:17170](http://localhost:17170) (default local dev credentials: `admin` / `localdevpass`)
+- **View local 2FA/reset notifications**: `podman exec authelia cat /data/notification.txt`
 
 ---
 
@@ -277,7 +292,7 @@ mise run helm-u
 
 ### Setup
 
-```bash
+```sh
 # Install tools and git hooks
 mise run install
 ```
@@ -290,11 +305,9 @@ Run tasks with `mise run <task>`:
 |---|---|---|
 | `install` | Install tools and set up git hooks | `hk install --mise` |
 | `hk` (or `check`) | Run all linters and hook checks | `hk check --all` |
-| `compose` | Start local container stack with Podman Compose | `podman compose up -d` |
+| `compose` | Start local LLDAP + Authelia preview stack | `podman compose up -d` |
 | `down` | Stop local Podman Compose stack | `podman compose down` |
 | `logs` | View Podman Compose logs | `podman compose logs -f` |
-| `play` | Test Helm chart manifests locally with Podman Play Kube | `podman play kube rendered.yaml --publish-all` |
-| `play-d` | Stop and remove Podman Play Kube pods | `podman play kube rendered.yaml --down` |
 | `helm-d` | Build Helm chart dependencies | `helm dependency build chart/` |
 | `helm-l` | Lint Helm chart | `helm lint chart/` |
 | `helm-t` | Render Helm chart templates to `rendered.yaml` | `helm template test chart/ > rendered.yaml` |

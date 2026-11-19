@@ -1,0 +1,46 @@
+# Local development Authelia configuration for compose.yml.
+# Authelia v4.39 requires a valid domain/IP and an https:// authelia_url to pass
+# startup validation, while still serving the UI over HTTP on http://127.0.0.1:9091.
+
+theme: "auto"
+
+server:
+  address: "tcp://0.0.0.0:9091"
+
+log:
+  level: "debug"
+
+totp:
+  issuer: "localhost"
+
+authentication_backend:
+  ldap:
+    implementation: lldap
+    address: "ldap://lldap:3890"
+    base_dn: "dc=local"
+    user: "uid=admin,ou=people,dc=local"
+
+access_control:
+  default_policy: "two_factor"
+
+session:
+  name: "authelia_session"
+  inactivity: "5m"
+  expiration: "1h"
+  remember_me: "1M"
+  cookies:
+    - domain: "127.0.0.1"
+      authelia_url: "https://127.0.0.1:9091"
+
+regulation:
+  max_retries: 3
+  find_time: "2m"
+  ban_time: "5m"
+
+storage:
+  local:
+    path: /data/db.sqlite3
+
+notifier:
+  filesystem:
+    filename: "/data/notification.txt"
