@@ -1,6 +1,6 @@
 # Default values for lab-authelia.
 # NOTE: If you are deploying this chart for your own homelab, update all occurrences of
-# `sso.joeckr.dev`, `joeckr.dev`, and `dc=joeckr,dc=dev` to match your own domain.
+# `authelia.joeckr.dev`, `joeckr.dev`, and `dc=joeckr,dc=dev` to match your own domain.
 
 global:
   timezone: "UTC"
@@ -22,7 +22,7 @@ authelia:
   port: 9091
 
   # NOTE: Update hostname and domain to match your own environment.
-  hostname: "sso.joeckr.dev" # Public hostname for the Authelia portal
+  hostname: "authelia.joeckr.dev" # Public hostname for the Authelia portal
   domain: "joeckr.dev" # Root cookie domain protected by Authelia
   defaultRedirectionUrl: "" # Optional post-login redirect URL (must differ from https://<authelia.hostname>)
 
