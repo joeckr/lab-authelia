@@ -73,10 +73,12 @@ authelia:
       sender: "" # e.g., "Authelia <authelia@joeckr.dev>"
 
   # Secret management for Authelia.
-  # Recommended for production: pre-create a Kubernetes Secret and reference it via existingSecret.
+  # Set secretCreate: false or provide existingSecret when managing secrets externally (e.g., External Secrets Operator).
   # Required keys in existingSecret: jwt-secret, session-secret, storage-encryption-key, ldap-password
   # Optional key when notifier.smtp.enabled=true: smtp-password
+  secretCreate: true
   existingSecret: ""
+  podAnnotations: {}
   secrets:
     # Provide random 32+ char secrets when existingSecret is empty (generate with: openssl rand -hex 32).
     jwtSecret: ""
@@ -164,9 +166,11 @@ lldap:
   httpUrl: "http://localhost:17170"
 
   # Secret management for LLDAP.
-  # Recommended for production: pre-create a Kubernetes Secret and reference it via existingSecret.
+  # Set secretCreate: false or provide existingSecret when managing secrets externally (e.g., External Secrets Operator).
   # Required keys in existingSecret: jwt-secret, key-seed, admin-password
+  secretCreate: true
   existingSecret: ""
+  podAnnotations: {}
   secrets:
     # Provide random 32+ char secrets when existingSecret is empty (generate with: openssl rand -hex 32).
     jwtSecret: ""
